@@ -38,7 +38,11 @@ class SafariBaseIE(InfoExtractor):
             'Downloading login page')
 
         def is_logged(urlh):
-            return 'learning.oreilly.com/home/' in urlh.geturl()
+            url = urlh.geturl()
+            parsed_url = compat_urlparse.urlparse(url)
+            return parsed_url.hostname.endswith('learning.oreilly.com') and (
+                parsed_url.path.startswith('/home-new/')
+                or (parsed_url.path == '/member/login/' and not parsed_url.query))
 
         if is_logged(urlh):
             self.LOGGED_IN = True
@@ -61,7 +65,7 @@ class SafariBaseIE(InfoExtractor):
                 'Referer': redirect_url,
             }, expected_status=400)
 
-        credentials = auth.get('credentials')
+        credentials = auth.get('id_token')
         if (not auth.get('logged_in') and not auth.get('redirect_uri')
                 and credentials):
             raise ExtractorError(
@@ -73,7 +77,7 @@ class SafariBaseIE(InfoExtractor):
             self._apply_first_set_cookie_header(urlh, cookie)
 
         _, urlh = self._download_webpage_handle(
-            auth.get('redirect_uri') or next_uri, None, 'Completing login',)
+            auth.get('redirect_uri') or next_uri, None, 'Completing login', )
 
         if is_logged(urlh):
             self.LOGGED_IN = True
@@ -193,6 +197,9 @@ class SafariApiIE(SafariBaseIE):
         part = self._download_json(
             url, '%s/%s' % (mobj.group('course_id'), mobj.group('part')),
             'Downloading part JSON')
+        part['web_url'] = part['asset_base_url'].replace('library/view',
+                                                         'videos') +\
+            part['videoclips'][0]['reference_id'] + '/'
         return self.url_result(part['web_url'], SafariIE.ie_key())
 
 
@@ -207,7 +214,8 @@ class SafariCourseIE(SafariBaseIE):
                             (?:
                                 library/view/[^/]+|
                                 api/v1/book|
-                                videos/[^/]+
+                                videos/[^/]+|
+                                course/[^/]+
                             )|
                             techbus\.safaribooksonline\.com
                         )
@@ -260,5 +268,54 @@ class SafariCourseIE(SafariBaseIE):
             for chapter in course_json['chapters']]
 
         course_title = course_json['title']
+
+        return self.playlist_result(entries, course_id, course_title)
+
+
+class SafariLearningPathIE(SafariBaseIE):
+    IE_NAME = 'safari:learning-path'
+    IE_DESC = 'safaribooksonline.com learning paths'
+
+    _VALID_URL = r'''(?x)
+                    https?://
+                        (?:
+                            (?:www\.)?((?:safaribooksonline|learning\.)?oreilly)\.com/
+                            (?:learning-paths/[^/]+)
+                        )
+                        /(?P<id>[^/]+)
+                    '''
+
+    _TESTS = [{
+        'url': 'https://www.safaribooksonline.com/learning-paths/learning-path-python/9781788996396',
+        'only_matching': True,
+    }, {
+        'url': 'https://learning.oreilly.com/learning-paths/learning-path-python/9781788996396',
+        'only_matching': True,
+    }]
+
+    @classmethod
+    def suitable(cls, url):
+        return (False if SafariIE.suitable(url)
+                else super(SafariLearningPathIE, cls).suitable(url))
+
+    def _real_extract(self, url):
+        course_id = self._match_id(url)
+
+        course_page = self._download_webpage(
+            url,
+            course_id, 'Downloading course Web Page')
+
+        link_ids = re.findall(r'(?:\"|\/)([0-9]{10,13}\-video[0-9]+)\"', course_page)
+        title = self._search_regex(r'\"workTitle\"\:[/s]*\"([^\"]*)\"', course_page, 'title')
+
+        if len(link_ids) == 0:
+            raise ExtractorError(
+                'No link IDs found for course %s' % course_id, expected=True)
+
+        entries = [
+            self.url_result(url + "/" + link, SafariLearningPathIE.ie_key())
+            for link in link_ids]
+
+        course_title = title
 
         return self.playlist_result(entries, course_id, course_title)

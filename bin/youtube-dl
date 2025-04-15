@@ -4,3 +4,6 @@ import youtube_dl
 
 if __name__ == '__main__':
     youtube_dl.main()
+    # youtube_dl.main(["--cookies",
+    #                  "~/Documents/learning.oreilly.com_cookies.txt", "--config-location", "~/.config/youtube-dl/config",
+    #                  "https://learning.oreilly.com/course/handson-data-structures/9781839211942"])
